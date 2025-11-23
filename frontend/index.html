@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Wellness Companion</title>
+    <style>
+        body {
+            font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+            background-color: #eef5f0; /* Calming Greenish Grey */
+            color: #333;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+        }
+        .container {
+            width: 100%;
+            max-width: 500px;
+            background: white;
+            padding: 30px;
+            border-radius: 20px;
+            box-shadow: 0 15px 30px rgba(56, 102, 65, 0.1);
+            height: 85vh;
+            display: flex;
+            flex-direction: column;
+        }
+        h1 {
+            text-align: center;
+            color: #386641;
+            margin-bottom: 10px;
+            font-weight: 300;
+        }
+        #chat-box {
+            flex-grow: 1;
+            overflow-y: auto;
+            margin-bottom: 20px;
+            padding: 15px;
+            border-radius: 10px;
+            background-color: #fcfdfc;
+            border: 1px solid #dbe7dd;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+        .message { padding: 12px 18px; border-radius: 18px; max-width: 80%; line-height: 1.5; }
+        .agent-msg { background-color: #a7c957; color: #1a4a26; align-self: flex-start; border-bottom-left-radius: 2px; }
+        .user-msg { background-color: #6a994e; color: white; align-self: flex-end; border-bottom-right-radius: 2px; }
+        .controls { display: flex; justify-content: center; }
+        button {
+            padding: 15px 30px;
+            font-size: 16px;
+            cursor: pointer;
+            background-color: #386641;
+            color: white;
+            border: none;
+            border-radius: 50px;
+            box-shadow: 0 5px 15px rgba(56, 102, 65, 0.3);
+            transition: transform 0.2s;
+        }
+        button:hover { transform: scale(1.05); background-color: #2d5234; }
+        button:disabled { background-color: #9caf88; cursor: default; transform: none; }
+        
+        /* Status Panel */
+        #status-panel {
+            margin-top: 20px;
+            padding: 15px;
+            background: #fff3e0; /* Soft Orange for contrast */
+            border-radius: 10px;
+            font-size: 14px;
+            color: #5d4037;
+        }
+        .status-item { margin-bottom: 5px; }
+        .label { font-weight: bold; color: #bc6c25; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🌿 Wellness Check-In</h1>
+        <div id="chat-box">
+            <!-- Messages go here -->
+        </div>
+        
+        <div class="controls">
+            <button id="mic-btn">Start Session</button>
+        </div>
+
+        <div id="status-panel">
+            <div class="status-item"><span class="label">Mood:</span> <span id="disp-mood">---</span></div>
+            <div class="status-item"><span class="label">Goals:</span> <span id="disp-goals">---</span></div>
+        </div>
+    </div>
+
+    <script>
+        // State matching Python's SessionState
+        let currentState = {
+            step: 0,
+            mood: null,
+            goals: [],
+            summary_text: null
+        };
+
+        const chatBox = document.getElementById('chat-box');
+        const micBtn = document.getElementById('mic-btn');
+        const dispMood = document.getElementById('disp-mood');
+        const dispGoals = document.getElementById('disp-goals');
+
+        // Speech Setup
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        const recognition = new SpeechRecognition();
+        recognition.lang = 'en-US';
+
+        // --- Core Logic ---
+
+        // 1. Start Session (Triggered by Button initially)
+        micBtn.addEventListener('click', () => {
+            if (currentState.step === 0 && chatBox.children.length === 0) {
+                // First run: Just wake up the agent, don't record user yet
+                sendToBackend(""); 
+                micBtn.textContent = "🎤 Tap to Reply";
+            } else {
+                // Normal conversation turn
+                recognition.start();
+                micBtn.textContent = "👂 Listening...";
+                micBtn.disabled = true;
+            }
+        });
+
+        recognition.onresult = (event) => {
+            const transcript = event.results[0][0].transcript;
+            addMessage(transcript, 'user-msg');
+            sendToBackend(transcript);
+        };
+
+        recognition.onend = () => {
+            if (!micBtn.textContent.includes("Complete")) {
+                micBtn.textContent = "🎤 Tap to Reply";
+                micBtn.disabled = false;
+            }
+        };
+
+        async function sendToBackend(userInput) {
+            try {
+                const response = await fetch('http://localhost:8000/chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        user_input: userInput,
+                        current_state: currentState
+                    })
+                });
+
+                const data = await response.json();
+                currentState = data.updated_state;
+
+                // Update UI Text
+                addMessage(data.agent_response, 'agent-msg');
+                speak(data.agent_response);
+
+                // Update Status Panel
+                if (currentState.mood) dispMood.textContent = currentState.mood;
+                if (currentState.goals.length > 0) dispGoals.textContent = currentState.goals.join(", ");
+
+                // Check Completion
+                if (data.is_complete) {
+                    micBtn.textContent = "✅ Log Saved";
+                    micBtn.disabled = true;
+                }
+
+            } catch (e) {
+                console.error(e);
+                addMessage("Error connecting to backend.", 'agent-msg');
+            }
+        }
+
+        function addMessage(text, className) {
+            const div = document.createElement('div');
+            div.classList.add('message', className);
+            div.innerText = text;
+            chatBox.appendChild(div);
+            chatBox.scrollTop = chatBox.scrollHeight;
+        }
+
+        function speak(text) {
+            const utterance = new SpeechSynthesisUtterance(text);
+            window.speechSynthesis.speak(utterance);
+        }
+    </script>
+</body>
+</html>

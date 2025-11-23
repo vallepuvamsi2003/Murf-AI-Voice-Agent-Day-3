@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+pydantic
+
+To Run : 
+
+ cd backend
+
+ python -m uvicorn main:app --reload
